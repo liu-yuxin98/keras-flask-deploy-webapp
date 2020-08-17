@@ -8,11 +8,11 @@ from gevent.pywsgi import WSGIServer
 
 # TensorFlow and tf.keras
 import tensorflow as tf
-from tensorflow import keras
+tf.config.experimental.set_visible_devices([], 'GPU')  # 强制使用 cpu
 
-from tensorflow.keras.applications.imagenet_utils import preprocess_input, decode_predictions
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
+from tensorflow.keras.applications.efficientnet import preprocess_input
 
 # Some utilites
 import numpy as np
@@ -25,35 +25,32 @@ app = Flask(__name__)
 
 # You can use pretrained model from Keras
 # Check https://keras.io/applications/
-from keras.applications.mobilenet_v2 import MobileNetV2
-model = MobileNetV2(weights='imagenet')
+# from keras.applications.mobilenet_v2 import MobileNetV2
+# model = MobileNetV2(weights='imagenet')
 
-print('Model loaded. Check http://127.0.0.1:5000/')
+# print('Model loaded. Check http://127.0.0.1:5000/')
 
 
 # Model saved with Keras model.save()
-MODEL_PATH = 'models/your_model.h5'
+MODEL_PATH = 'models/model.h5'
+LABEL_PATH = 'models/labels.txt'
 
 # Load your own trained model
-# model = load_model(MODEL_PATH)
-# model._make_predict_function()          # Necessary
-# print('Model loaded. Start serving...')
+model = load_model(MODEL_PATH)
+print('Model loaded. Start serving...')
+labels = [x.strip() for x in open(LABEL_PATH, 'rt').readlines()]
+image_size = (256, 256)
 
 
 def model_predict(img, model):
-    img = img.resize((224, 224))
-
-    # Preprocessing the image
-    x = image.img_to_array(img)
-    # x = np.true_divide(x, 255)
+    img = img.resize(image_size)
+    x = preprocess_input(img)
+    x = image.img_to_array(x)
     x = np.expand_dims(x, axis=0)
 
-    # Be careful how your trained model deals with the input
-    # otherwise, it won't make correct prediction!
-    x = preprocess_input(x, mode='tf')
-
     preds = model.predict(x)
-    return preds
+    idx = np.argmax(preds)
+    return float(preds[0][idx]), labels[idx]
 
 
 @app.route('/', methods=['GET'])
@@ -72,17 +69,10 @@ def predict():
         # img.save("./uploads/image.png")
 
         # Make prediction
-        preds = model_predict(img, model)
+        pred_proba, pred_class = model_predict(img, model)
 
-        # Process your result for human
-        pred_proba = "{:.3f}".format(np.amax(preds))    # Max probability
-        pred_class = decode_predictions(preds, top=1)   # ImageNet Decode
-
-        result = str(pred_class[0][0][1])               # Convert to string
-        result = result.replace('_', ' ').capitalize()
-        
         # Serialize the result, you can add additional fields
-        return jsonify(result=result, probability=pred_proba)
+        return jsonify(result=pred_class, probability=pred_proba)
 
     return None
 
